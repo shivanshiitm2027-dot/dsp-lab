@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Audio Lab</title>
+<style>
+body{background:#081321;color:#e2edff;font:17px system-ui;
+max-width:850px;margin:40px auto;padding:20px}
+button{background:#40d9b5;border:0;padding:13px;
+border-radius:9px;cursor:pointer;margin:6px}
+button:disabled{opacity:.5;cursor:default}
+p{line-height:1.6;color:#b8c9de}
+.result{background:#12243a;padding:14px;margin:12px 0;border-radius:10px}
+progress{width:100%;height:18px}
+a{color:#40d9b5}
+</style>
+</head>
+<body>
+<h1>🧠 AI Sound Classifier</h1>
+<p>Shivanshu Yadav | IIT Madras</p>
+<p>Pretrained AST model · Local browser inference</p>
+
+<button id="load">1. Load AI model</button>
+<button id="start" disabled>2. Share YouTube tab audio</button>
+<button id="stop" disabled>Stop</button>
+
+<p id="status">Load the model first. Initial download may take several minutes.</p>
+<div id="results"></div>
+<p>Each prediction uses a 10-second audio clip.
+Results update after capture and inference finish.</p>
+<p>Scores are model outputs, not guaranteed accuracy.
+Multiple sounds can be present. This does not identify song titles.</p>
+<p>Audio is temporarily buffered in this browser for analysis.
+This page does not upload or save recordings.</p>
+<a href="./">← Back to DSP Lab</a>
+
+<script type="module">
+const el=id=>document.getElementById(id);
+let classifier,stream,recorder,timer;
+let running=false,session=0;
+
+function status(message){el("status").textContent=message;}
+
+el("load").onclick=async()=>{
+  el("load").disabled=true;
+  try{
+    status("Loading library and model. Keep this tab open…");
+    const {pipeline,env}=await import(
+      "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2"
+    );
+    // Single-thread WASM also works without cross-origin isolation headers.
+    env.backends.onnx.wasm.numThreads=1;
+    classifier=await pipeline(
+      "audio-classification",
+      "Xenova/ast-finetuned-audioset-10-10-0.4593",
+      {
+        device:"wasm",
+        dtype:"q8",
+        progress_callback:event=>{
+          if(event.status==="progress"){
+            status("Downloading "+event.file+": "+
+              Number(event.progress).toFixed(0)+"%");
+          }
+        }
+      }
+    );
+    status("Model ready. Share a playing YouTube tab.");
+    el("start").disabled=false;
+    el("load").textContent="AI model loaded ✓";
+  }catch(error){
+    status("Model loading failed: "+error.message);
+    el("load").disabled=false;
+  }
+};
+
+function stop(){
+  running=false;
+  session++;
+  clearTimeout(timer);
+  if(recorder && recorder.state!=="inactive")recorder.stop();
+  if(stream)stream.getTracks().forEach(track=>track.stop());
+  stream=null;
+  el("start").disabled=!classifier;
+  el("stop").disabled=true;
+  status("Stopped. Current inference, if any, may finish in the background.");
+}
+
+async function classify(blob,id){
+  let decodingContext;
+  try{
+    status("Preparing 10-second audio clip…");
+    decodingContext=new AudioContext();
+    const decoded=await decodingContext.decodeAudioData(
+      await blob.arrayBuffer()
+    );
+    await decodingContext.close();
+    decodingContext=null;
+
+    // Browser resampling and channel mixing to 16 kHz mono.
+    const length=Math.round(decoded.duration*16000);
+    if(length<16000)throw new Error("Audio clip was too short.");
+
+    const offline=new OfflineAudioContext(1,length,16000);
+    const source=offline.createBufferSource();
+    source.buffer=decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered=await offline.startRendering();
+    const samples=rendered.getChannelData(0);
+
+    let power=0;
+    for(const value of samples)power+=value*value;
+    if(!running || id!==session)return;
+    if(Math.sqrt(power/samples.length)<0.0001){
+      status("Near silence. Check song playback and shared tab audio.");
+      el("results").replaceChildren();
+      return;
+    }
+
+    status("AI is analysing the sound…");
+    const predictions=await classifier(samples,{top_k:5});
+    if(!running || id!==session)return;
+
+    el("results").replaceChildren();
+    for(const result of predictions){
+      const row=document.createElement("div");
+      row.className="result";
+      const label=document.createElement("div");
+      label.textContent=result.label+" — score "+
+        Number(result.score).toFixed(3);
+      const bar=document.createElement("progress");
+      bar.max=1;
+      bar.value=result.score;
+      row.append(label,bar);
+      el("results").append(row);
+    }
+    status("Prediction updated. Capturing the next clip…");
+  }catch(error){
+    if(running && id===session)status("Analysis error: "+error.message);
+  }finally{
+    if(decodingContext)await decodingContext.close().catch(()=>{});
+    if(running && id===session){
+      timer=setTimeout(()=>capture(id),1500);
+    }
+  }
+}
+
+function capture(id){
+  if(!running || id!==session)return;
+  try{
+    const audio=new MediaStream(stream.getAudioTracks());
+    const chunks=[];
+    recorder=new MediaRecorder(audio);
+    recorder.ondataavailable=event=>{
+      if(event.data.size)chunks.push(event.data);
+    };
+    recorder.onstop=()=>{
+      if(running && id===session){
+        const type=chunks[0]?.type || recorder.mimeType;
+        classify(new Blob(chunks,{type}),id);
+      }
+    };
+    recorder.onerror=()=>{
+      stop();
+      status("Audio capture failed. Try sharing the tab again.");
+    };
+    status("Listening: capturing 10 seconds…");
+    recorder.start();
+    timer=setTimeout(()=>{
+      if(recorder.state==="recording")recorder.stop();
+    },10000);
+  }catch(error){
+    stop();
+    status("Capture failed: "+error.message);
+  }
+}
+
+el("start").onclick=async()=>{
+  el("start").disabled=true;
+  try{
+    stream=await navigator.mediaDevices.getDisplayMedia({
+      video:true,
+      audio:{suppressLocalAudioPlayback:false}
+    });
+    if(!stream.getAudioTracks().length){
+      throw new Error("Choose Chrome Tab and enable Share tab audio.");
+    }
+    running=true;
+    const id=++session;
+    el("stop").disabled=false;
+    stream.getVideoTracks()[0].onended=stop;
+    capture(id);
+  }catch(error){
+    stop();
+    status(error.message);
+  }
+};
+el("stop").onclick=stop;
+</script>
+</body>
+</html>
