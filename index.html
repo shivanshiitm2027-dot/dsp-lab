@@ -11,8 +11,45 @@ background:#40d9b5;margin-right:10px;cursor:pointer}
 canvas{width:100%;background:#101f32;border-radius:12px}
 p{color:#afbed1}
 </style>
+
+<style id="corner-photo-style">
+#author-photo {
+  position: fixed !important;
+  top: 16px;
+  right: 16px;
+  margin: 0 !important;
+  z-index: 100;
+}
+#author-photo > div { display: none; }
+#author-photo img {
+  width: 76px !important;
+  height: 76px !important;
+  box-shadow: 0 3px 14px #0008;
+}
+@media (max-width: 600px) {
+  #author-photo { top: 8px; right: 8px; }
+  #author-photo img {
+    width: 48px !important;
+    height: 48px !important;
+  }
+}
+</style>
+
 </head>
 <body>
+<div id="author-photo" style="display:flex;align-items:center;
+gap:18px;flex-wrap:wrap;margin:20px 0 30px">
+  <img src="shivanshu-profile.png" alt="Shivanshu Yadav"
+       style="width:130px;height:130px;object-fit:cover;
+       object-position:55% 35%;border-radius:50%;
+       border:3px solid #40d9b5">
+  <div>
+    <strong style="font-size:26px">Shivanshu Yadav</strong>
+    <p>IIT Madras | Electronic Systems</p>
+    <p>Audio DSP &amp; AI Learning Lab</p>
+  </div>
+</div>
+
 <h1>🎵 Live YouTube Audio Lab</h1>
 <p>Shivanshu Yadav | IIT Madras</p>
 <button id="start">Share YouTube tab audio</button>
