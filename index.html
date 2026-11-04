@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Live Music Visualizer</title>
+<style>
+body{background:#081321;color:#dceaff;font:17px system-ui;
+max-width:1100px;margin:35px auto;padding:20px}
+button{padding:12px 20px;border:0;border-radius:9px;
+background:#40d9b5;margin-right:10px;cursor:pointer}
+canvas{width:100%;background:#101f32;border-radius:12px}
+p{color:#afbed1}
+</style>
+</head>
+<body>
+<h1>🎵 Live YouTube Audio Lab</h1>
+<p>Shivanshu Yadav | IIT Madras</p>
+<button id="start">Share YouTube tab audio</button>
+<button id="stop" disabled>Stop</button>
+<p id="status">Open YouTube in another Chrome tab first.</p>
+
+<section id="djLab" style="padding:22px;background:#10283a;border:1px solid #286074;border-radius:16px;margin:25px 0">
+<h2>DJ Player / Local Audio Lab</h2>
+<p>Load audio or a browser-supported video. EQ and filters change what you hear and what the existing live graphs / FPGA FFT capture receive. Local files stay on this computer.</p>
+<input id="djFile" type="file" accept="audio/*,video/*">
+<video id="djMedia" controls playsinline style="display:block;width:100%;max-height:300px;margin:15px 0"></video>
+<div id="djSliders" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px"></div>
+<p><label>Playback filter <select id="djMode"><option value="off">Off</option><option value="lowpass">Low-pass</option><option value="highpass">High-pass</option><option value="bandpass">Band-pass</option></select></label>
+<label><input id="djLoop" type="checkbox"> Loop</label></p>
+<button id="djReset">Reset sound controls</button>
+<p id="djMessage">Choose a file, then press Play. WAV is recommended if a video codec is unsupported.</p>
+<p>Speed also changes duration; pitch preservation depends on the browser. These controls apply to this local player. The existing comparison and quantization panels remain analysis experiments.</p>
+</section>
+<h2>Scrolling RMS level — newest sound on right</h2>
+<canvas id="wave" width="1000" height="250"></canvas>
+<h2>Frequency spectrum</h2>
+<canvas id="spectrum" width="1000" height="230"></canvas>
+<p>Left: bass · Right: treble, on a logarithmic frequency scale.</p>
+
+<!-- live-analysis-upgrade -->
+<section style="margin-top:30px">
+<h2>Live audio measurements</h2>
+<p id="measurements">Share YouTube tab audio to begin.</p>
+
+<label>Display sensitivity:
+<input id="sensitivity" type="range"
+ min="0.25" max="4" step="0.25" value="1">
+</label>
+<button id="freeze">Freeze graphs</button>
+
+<h2>Actual waveform + digital samples</h2>
+<canvas id="samples" width="1000" height="300"></canvas>
+<p>Green: connected samples · Orange: individual samples.
+Showing a short digital audio window, not measured analog voltage.</p>
+<p>Display sensitivity changes graph height only, not playback volume.</p>
+</section>
+
+
+<!-- filter-spectrogram-upgrade -->
+<section>
+<h2>🎛 Filter Comparison</h2>
+<label>Filter:
+<select id="filterMode">
+<option value="lowpass">Low-pass: keep bass</option>
+<option value="highpass">High-pass: keep highs</option>
+<option value="bandpass">Band-pass: keep a frequency region</option>
+</select>
+</label>
+<label>Frequency:
+<input id="filterFrequency" type="range"
+ min="50" max="10000" value="1000" step="50">
+<span id="frequencyValue">1000 Hz</span>
+</label>
+<p>Green: original · Orange: filtered.
+Shared fixed scale; analysis only.</p>
+<canvas id="comparison" width="1000" height="260"></canvas>
+
+<h2>🌈 Live Spectrogram</h2>
+<p>Newest sound at right. Bottom: bass · Top: treble.
+Brighter colour means stronger energy in that frequency bin.</p>
+<canvas id="spectrogram" width="1000" height="300"></canvas>
+<p>Colour shows relative digital level, not calibrated loudness.</p>
+</section>
+
+
+<!-- quantization-lab -->
+<section>
+<h2>🔢 Live Quantization Lab</h2>
+<label>Bit depth:
+<select id="quantBits">
+<option>2</option>
+<option>4</option>
+<option selected>8</option>
+<option>12</option>
+<option>16</option>
+</select>
+</label>
+<button id="quantFreeze">Freeze this panel</button>
+<button id="quantDownload">Download samples CSV</button>
+
+<p id="quantStats">Share song audio to begin.</p>
+<p>Green: original digital samples · Orange: reduced-bit samples.</p>
+<canvas id="quantWave" width="1000" height="260"></canvas>
+
+<h3>Quantization error: reduced-bit − original</h3>
+<canvas id="quantError" width="1000" height="180"></canvas>
+<p>Error uses an enlarged scale of ±1 quantization step.</p>
+
+<h3>First 8 samples in the current window</h3>
+<div style="overflow-x:auto">
+<table style="width:100%;text-align:left;border-spacing:12px">
+<thead>
+<tr>
+<th>Index</th><th>Time (ms)</th><th>Original</th>
+<th>Quantized</th><th>Signed code</th><th>Binary</th>
+</tr>
+</thead>
+<tbody id="quantTable"></tbody>
+</table>
+</div>
+<p>Binary uses two’s complement. This is software requantization
+of already-digital audio, not a physical ADC measurement.
+YouTube playback remains unchanged.</p>
+</section>
+
+
+<!-- sampling-lab -->
+<section>
+<h2>📉 Sampling & Aliasing Lab</h2>
+
+<label>Downsample factor:
+<select id="decimation">
+<option value="2">2</option>
+<option value="4">4</option>
+<option value="8" selected>8</option>
+<option value="16">16</option>
+</select>
+</label>
+
+<label>
+<input type="checkbox" id="antiAlias" checked>
+Anti-alias filter ON
+</label>
+
+<p id="samplingStats">Share song audio to begin.</p>
+<h3>Original vs downsampled samples</h3>
+<canvas id="samplingWave" width="1000" height="260"></canvas>
+<p>Green: original · Orange dots: retained samples.
+Lines between dots are only a visual guide.</p>
+
+<h3>Frequency comparison</h3>
+<canvas id="samplingSpectrum" width="1000" height="280"></canvas>
+<p>Green: original spectrum · Orange: downsampled spectrum.
+Red line: new Nyquist limit. Horizontal axis is frequency in Hz.</p>
+<p>With filtering OFF, frequencies above the new Nyquist limit
+can fold into lower frequencies. Filtering ON reduces this effect.
+The filter is practical, not an ideal brick-wall filter.</p>
+</section>
+
+<script>
+const decimation=document.getElementById("decimation");
+const antiAlias=document.getElementById("antiAlias");
+const samplingStats=document.getElementById("samplingStats");
+const samplingWave=document.getElementById("samplingWave");
+const samplingSpectrum=document.getElementById("samplingSpectrum");
+
+let samplingContext=null, samplingSource=null;
+let aaFilters=[], aaAnalyser=null, aaBuffer=null;
+let lastSamplingUpdate=0;
+
+function samplingLab(original, audioContext, originalSource){
+  const factor=Number(decimation.value);
+  const newRate=audioContext.sampleRate/factor;
+  const nyquist=newRate/2;
+
+  if(samplingContext!==audioContext || samplingSource!==originalSource){
+    if(samplingSource && aaFilters.length){
+      try{samplingSource.disconnect(aaFilters[0]);}catch(e){}
+    }
+    aaFilters.forEach(filter=>filter.disconnect());
+    if(aaAnalyser)aaAnalyser.disconnect();
+
+    samplingContext=audioContext;
+    samplingSource=originalSource;
+
+    // Four cascaded low-pass stages: an eighth-order practical filter.
+    aaFilters=Array.from({length:4},()=>{
+      const filter=audioContext.createBiquadFilter();
+      filter.type="lowpass";
+      filter.Q.value=0.707;
+      return filter;
+    });
+    originalSource.connect(aaFilters[0]);
+    for(let i=1;i<aaFilters.length;i++){
+      aaFilters[i-1].connect(aaFilters[i]);
+    }
+
+    aaAnalyser=audioContext.createAnalyser();
+    aaAnalyser.fftSize=4096;
+    aaFilters[3].connect(aaAnalyser);
+    aaBuffer=new Float32Array(aaAnalyser.fftSize);
+  }
+
+  const cutoff=nyquist*0.7;
+  aaFilters.forEach(filter=>{
+    filter.frequency.setTargetAtTime(
+      cutoff,audioContext.currentTime,0.02
+    );
+  });
+
+  const now=performance.now();
+  if(now-lastSamplingUpdate<250)return;
+  lastSamplingUpdate=now;
+
+  aaAnalyser.getFloatTimeDomainData(aaBuffer);
+  const input=antiAlias.checked ? aaBuffer : original;
+  const reduced=[];
+  for(let i=0;i<input.length;i+=factor)reduced.push(input[i]);
+
+  samplingStats.textContent=
+    "Original: "+audioContext.sampleRate.toLocaleString()+" samples/s"+
+    " | New: "+newRate.toLocaleString()+" samples/s"+
+    " | New Nyquist: "+nyquist.toFixed(0)+" Hz"+
+    " | Filter cutoff: "+cutoff.toFixed(0)+" Hz"+
+    " | Filter: "+(antiAlias.checked?"ON":"OFF");
+
+  const c=samplingWave.getContext("2d");
+  c.clearRect(0,0,1000,260);
+  const duration=0.01;
+  const n=Math.min(original.length,Math.floor(duration*audioContext.sampleRate));
+  const y=value=>130-value*110;
+  const x=i=>45+i/(n-1)*935;
+
+  c.strokeStyle="#294059";
+  c.beginPath();c.moveTo(45,130);c.lineTo(980,130);c.stroke();
+
+  c.strokeStyle="#40d9b5";c.lineWidth=1.3;c.beginPath();
+  for(let i=0;i<n;i++){
+    if(i===0)c.moveTo(x(i),y(original[i]));
+    else c.lineTo(x(i),y(original[i]));
+  }
+  c.stroke();
+
+  c.strokeStyle="#ffab65";c.beginPath();
+  let first=true;
+  for(let i=0;i<n;i+=factor){
+    if(first){c.moveTo(x(i),y(input[i]));first=false;}
+    else c.lineTo(x(i),y(input[i]));
+  }
+  c.stroke();
+  c.fillStyle="#ffab65";
+  for(let i=0;i<n;i+=factor){
+    c.beginPath();c.arc(x(i),y(input[i]),3,0,2*Math.PI);c.fill();
+  }
+  c.fillStyle="#afbed1";c.font="12px system-ui";
+  c.fillText("0 ms",45,250);c.fillText("~10 ms",920,250);
+
+  // Windowed DFT at selected bins, normalized to a shared amplitude scale.
+  function spectrum(values,maxPoints){
+    const N=values.length;
+    const stride=Math.max(1,Math.ceil((N/2)/maxPoints));
+    const result=[];
+    let windowSum=0;
+    const window=Array.from({length:N},(_,i)=>
+      0.5-0.5*Math.cos(2*Math.PI*i/(N-1))
+    );
+    for(const value of window)windowSum+=value;
+
+    for(let k=0;k<=Math.floor(N/2);k+=stride){
+      let real=0,imag=0;
+      for(let i=0;i<N;i++){
+        const angle=2*Math.PI*k*i/N;
+        const value=values[i]*window[i];
+        real+=value*Math.cos(angle);
+        imag-=value*Math.sin(angle);
+      }
+      const edge=(k===0 || k===N/2)?1:2;
+      const amplitude=edge*Math.hypot(real,imag)/windowSum;
+      result.push([k/N,20*Math.log10(Math.max(amplitude,1e-6))]);
+    }
+    return result;
+  }
+
+  const originalSpectrum=spectrum(original,180);
+  const reducedSpectrum=spectrum(reduced,180);
+  const p=samplingSpectrum.getContext("2d");
+  p.clearRect(0,0,1000,280);
+  const maxHz=audioContext.sampleRate/2;
+  const fx=hz=>55+hz/maxHz*920;
+  const fy=db=>20+(0-Math.max(-100,Math.min(0,db)))/100*210;
+
+  p.font="12px system-ui";
+  for(const db of [0,-20,-40,-60,-80,-100]){
+    p.strokeStyle="#294059";
+    p.beginPath();p.moveTo(55,fy(db));p.lineTo(975,fy(db));p.stroke();
+    p.fillStyle="#afbed1";p.fillText(db+" dB",2,fy(db)+4);
+  }
+  for(let i=0;i<=4;i++){
+    const hz=maxHz*i/4;
+    p.fillStyle="#afbed1";
+    p.fillText(Math.round(hz)+" Hz",Math.min(fx(hz),920),260);
+  }
+
+  function spectrumTrace(data,rate,colour){
+    p.strokeStyle=colour;p.lineWidth=2;p.beginPath();
+    data.forEach((point,i)=>{
+      const x=fx(point[0]*rate),y=fy(point[1]);
+      if(i===0)p.moveTo(x,y);else p.lineTo(x,y);
+    });
+    p.stroke();
+  }
+  spectrumTrace(originalSpectrum,audioContext.sampleRate,"#40d9b5");
+  spectrumTrace(reducedSpectrum,newRate,"#ffab65");
+
+  p.strokeStyle="#ff6279";p.setLineDash([5,5]);
+  p.beginPath();p.moveTo(fx(nyquist),15);
+  p.lineTo(fx(nyquist),235);p.stroke();p.setLineDash([]);
+  p.fillStyle="#ff6279";
+  p.fillText("New Nyquist",fx(nyquist)+5,14);
+}
+</script>
+
+<script>
+const quantBits=document.getElementById("quantBits");
+const quantStats=document.getElementById("quantStats");
+const quantTable=document.getElementById("quantTable");
+const quantWave=document.getElementById("quantWave");
+const quantError=document.getElementById("quantError");
+let quantPaused=false;
+let quantSnapshot=null;
+let quantLast=0;
+
+document.getElementById("quantFreeze").onclick=function(){
+  quantPaused=!quantPaused;
+  this.textContent=quantPaused ? "Resume this panel" : "Freeze this panel";
+};
+
+function showQuantization(values,audioContext){
+  if(quantPaused)return;
+  const now=performance.now();
+  if(now-quantLast<100)return;
+  quantLast=now;
+
+  const bits=Number(quantBits.value);
+  const scale=2**(bits-1);
+  const step=1/scale;
+  const count=Math.min(
+    values.length,Math.round(audioContext.sampleRate*0.01)
+  );
+  const original=Array.from(values.slice(0,count));
+  const codes=original.map(value=>
+    Math.max(-scale,Math.min(scale-1,Math.round(value*scale)))
+  );
+  const reduced=codes.map(value=>value/scale);
+  const errors=reduced.map((value,i)=>value-original[i]);
+  const rms=Math.sqrt(
+    errors.reduce((sum,value)=>sum+value*value,0)/count
+  );
+  const binary=code=>
+    (code<0 ? code+2**bits : code).toString(2).padStart(bits,"0");
+
+  quantSnapshot={
+    original,reduced,errors,codes,bits,
+    sampleRate:audioContext.sampleRate
+  };
+
+  quantStats.textContent=
+    bits+" bits | "+(2**bits).toLocaleString()+" levels"+
+    " | Step: "+step.toFixed(6)+
+    " | Error RMS: "+rms.toExponential(3);
+
+  function background(canvas){
+    const c=canvas.getContext("2d");
+    c.clearRect(0,0,canvas.width,canvas.height);
+    c.strokeStyle="#294059";
+    c.lineWidth=1;
+    for(let i=0;i<=4;i++){
+      const y=15+i*(canvas.height-45)/4;
+      c.beginPath();c.moveTo(45,y);
+      c.lineTo(canvas.width-15,y);c.stroke();
+    }
+    c.fillStyle="#afbed1";
+    c.font="12px system-ui";
+    c.fillText("0 ms",45,canvas.height-8);
+    c.fillText(
+      ((count-1)/audioContext.sampleRate*1000).toFixed(2)+" ms",
+      canvas.width-80,canvas.height-8
+    );
+    return c;
+  }
+
+  function trace(canvas,c,data,colour,range,hold){
+    const left=45,width=canvas.width-60;
+    const middle=(canvas.height-30)/2;
+    const amplitude=(canvas.height-50)/2;
+    const x=i=>left+i/(count-1)*width;
+    const y=value=>middle-value/range*amplitude;
+
+    c.save();
+    c.beginPath();
+    c.rect(left,0,width,canvas.height-25);c.clip();
+    c.strokeStyle=colour;c.lineWidth=1.5;c.beginPath();
+    c.moveTo(x(0),y(data[0]));
+    for(let i=1;i<count;i++){
+      if(hold)c.lineTo(x(i),y(data[i-1]));
+      c.lineTo(x(i),y(data[i]));
+    }
+    c.stroke();
+    c.restore();
+  }
+
+  const wc=background(quantWave);
+  trace(quantWave,wc,original,"#40d9b5",1,false);
+  trace(quantWave,wc,reduced,"#ffab65",1,true);
+
+  const ec=background(quantError);
+  trace(quantError,ec,errors,"#df8dff",step,false);
+  ec.fillStyle="#afbed1";
+  ec.fillText("+1 step",2,15);
+  ec.fillText("−1 step",2,quantError.height-35);
+
+  quantTable.innerHTML=original.slice(0,8).map((value,i)=>
+    "<tr><td>"+i+"</td><td>"+
+    (i/audioContext.sampleRate*1000).toFixed(4)+
+    "</td><td>"+value.toFixed(6)+
+    "</td><td>"+reduced[i].toFixed(6)+
+    "</td><td>"+codes[i]+
+    "</td><td><code>"+binary(codes[i])+"</code></td></tr>"
+  ).join("");
+}
+
+document.getElementById("quantDownload").onclick=()=>{
+  if(!quantSnapshot){
+    alert("Share song audio first.");
+    return;
+  }
+  const q=quantSnapshot;
+  let csv="index,time_seconds,original,quantized,error,signed_code,binary\n";
+  q.original.forEach((value,i)=>{
+    const code=q.codes[i];
+    const binary=(code<0 ? code+2**q.bits : code)
+      .toString(2).padStart(q.bits,"0");
+    csv+=[
+      i,i/q.sampleRate,value,q.reduced[i],
+      q.errors[i],code,binary
+    ].join(",")+"\n";
+  });
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  const a=document.createElement("a");
+  a.href=url;a.download="quantization_samples.csv";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+</script>
+
+<script>
+const filterMode=document.getElementById("filterMode");
+const filterFrequency=document.getElementById("filterFrequency");
+const frequencyValue=document.getElementById("frequencyValue");
+const comparison=document.getElementById("comparison");
+const compareCtx=comparison.getContext("2d");
+const spectrogram=document.getElementById("spectrogram");
+const spectroCtx=spectrogram.getContext("2d");
+
+let filterContext=null;
+let filterSource=null;
+let filterNode=null;
+let filteredAnalyser=null;
+let filteredSamples=null;
+
+filterFrequency.oninput=()=>{
+  frequencyValue.textContent=filterFrequency.value+" Hz";
+};
+
+function extraAnalysis(original, audioContext, originalSource, inputAnalyser){
+  // Recreate the analysis branch when sharing starts again.
+  if(filterContext!==audioContext || filterSource!==originalSource){
+    if(filterSource && filterNode){
+      try{filterSource.disconnect(filterNode);}catch(e){}
+    }
+    if(filterNode)filterNode.disconnect();
+    if(filteredAnalyser)filteredAnalyser.disconnect();
+
+    filterContext=audioContext;
+    filterSource=originalSource;
+    filterNode=audioContext.createBiquadFilter();
+    filteredAnalyser=audioContext.createAnalyser();
+    filteredAnalyser.fftSize=inputAnalyser.fftSize;
+    filteredSamples=new Float32Array(filteredAnalyser.fftSize);
+
+    originalSource.connect(filterNode);
+    filterNode.connect(filteredAnalyser);
+    // No destination connection: avoid duplicate audio playback.
+    spectroCtx.clearRect(0,0,1000,300);
+  }
+
+  filterNode.type=filterMode.value;
+  filterNode.frequency.setTargetAtTime(
+    Math.min(Number(filterFrequency.value),audioContext.sampleRate*0.45),
+    audioContext.currentTime,0.02
+  );
+  filterNode.Q.value=0.707;
+  filteredAnalyser.getFloatTimeDomainData(filteredSamples);
+
+  const count=Math.min(
+    original.length,Math.round(audioContext.sampleRate*0.01)
+  );
+  compareCtx.clearRect(0,0,1000,260);
+  compareCtx.strokeStyle="#294059";
+  compareCtx.beginPath();
+  compareCtx.moveTo(0,130);
+  compareCtx.lineTo(1000,130);
+  compareCtx.stroke();
+
+  function trace(values,colour){
+    compareCtx.strokeStyle=colour;
+    compareCtx.lineWidth=1.5;
+    compareCtx.beginPath();
+    for(let i=0;i<count;i++){
+      const x=i/(count-1)*1000;
+      const y=130-values[i]*110;
+      if(i===0)compareCtx.moveTo(x,y);
+      else compareCtx.lineTo(x,y);
+    }
+    compareCtx.stroke();
+  }
+
+  trace(original,"#40d9b5");
+  trace(filteredSamples,"#ffab65");
+
+  // Scrolling spectrogram from the original audio.
+  const dbBins=new Float32Array(inputAnalyser.frequencyBinCount);
+  inputAnalyser.getFloatFrequencyData(dbBins);
+  spectroCtx.drawImage(spectrogram,3,0,997,300,0,0,997,300);
+
+  const minHz=20;
+  const maxHz=Math.min(20000,audioContext.sampleRate/2);
+  for(let row=0;row<300;row++){
+    const frequency=minHz*Math.pow(maxHz/minHz,1-row/299);
+    const bin=Math.min(
+      dbBins.length-1,
+      Math.max(0,Math.round(
+        frequency/audioContext.sampleRate*inputAnalyser.fftSize
+      ))
+    );
+    const level=Math.max(0,Math.min(1,(dbBins[bin]+100)/80));
+    spectroCtx.fillStyle=
+      "hsl("+(250-220*level)+",90%,"+(5+55*level)+"%)";
+    spectroCtx.fillRect(997,row,3,1);
+  }
+}
+</script>
+
+<script>
+const sampleCanvas=document.getElementById("samples");
+const sampleCtx=sampleCanvas.getContext("2d");
+const sensitivity=document.getElementById("sensitivity");
+const measurements=document.getElementById("measurements");
+let frozen=false;
+
+document.getElementById("freeze").onclick=function(){
+  frozen=!frozen;
+  this.textContent=frozen ? "Resume graphs" : "Freeze graphs";
+};
+
+function showAnalysis(values, audioContext){
+  let sum=0, peak=0;
+  for(const value of values){
+    sum+=value*value;
+    peak=Math.max(peak,Math.abs(value));
+  }
+  const rms=Math.sqrt(sum/values.length);
+  const db=value=>value>0
+    ? (20*Math.log10(value)).toFixed(1)+" dBFS"
+    : "−∞ dBFS";
+
+  measurements.textContent=
+    "RMS: "+db(rms)+" | Peak: "+db(peak)+
+    " | Sample rate: "+audioContext.sampleRate.toLocaleString()+" Hz";
+
+  const c=sampleCtx;
+  const width=sampleCanvas.width, height=sampleCanvas.height;
+  const left=55, right=width-20, middle=135;
+  const gain=Number(sensitivity.value);
+  const count=Math.min(
+    values.length, Math.round(audioContext.sampleRate*0.01)
+  );
+  const x=i=>left+i/(count-1)*(right-left);
+  const y=value=>middle-value*100*gain;
+
+  c.clearRect(0,0,width,height);
+  c.font="12px system-ui";
+  c.lineWidth=1;
+
+  for(const level of [-1,-0.5,0,0.5,1]){
+    const position=middle-level*100;
+    c.strokeStyle="#294059";
+    c.beginPath(); c.moveTo(left,position);
+    c.lineTo(right,position); c.stroke();
+    c.fillStyle="#afbed1";
+    c.fillText(String(level),10,position+4);
+  }
+
+  for(let tick=0;tick<=5;tick++){
+    const i=tick*(count-1)/5;
+    const position=x(i);
+    c.strokeStyle="#294059";
+    c.beginPath(); c.moveTo(position,25);
+    c.lineTo(position,245); c.stroke();
+    c.fillStyle="#afbed1";
+    c.fillText(
+      (i/audioContext.sampleRate*1000).toFixed(1)+" ms",
+      position-15,270
+    );
+  }
+
+  c.save();
+  c.beginPath(); c.rect(left,25,right-left,220); c.clip();
+  c.strokeStyle="#40d9b5";
+  c.lineWidth=1.5;
+  c.beginPath();
+  for(let i=0;i<count;i++){
+    if(i===0)c.moveTo(x(i),y(values[i]));
+    else c.lineTo(x(i),y(values[i]));
+  }
+  c.stroke();
+
+  c.fillStyle="#ffab65";
+  for(let i=0;i<count;i++){
+    c.beginPath();
+    c.arc(x(i),y(values[i]),2,0,2*Math.PI);
+    c.fill();
+  }
+  c.restore();
+}
+</script>
+
+<script>
+const start=document.getElementById("start");
+const stop=document.getElementById("stop");
+const status=document.getElementById("status");
+const wave=document.getElementById("wave");
+const spectrum=document.getElementById("spectrum");
+const w=wave.getContext("2d");
+const s=spectrum.getContext("2d");
+let stream, context, source, analyser, frame;
+let previous=0;
+
+function cleanup(keepPlayer=false){
+  if(keepPlayer!==true) document.getElementById("djMedia").pause();
+  cancelAnimationFrame(frame);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  if(source) source.disconnect();
+  if(context && context!==dj.ctx) context.close().catch(()=>{});
+  stream=null; context=null; source=null;
+  start.disabled=false; stop.disabled=true;
+  status.textContent="Stopped.";
+}
+
+start.onclick=async()=>{
+  cleanup();
+  start.disabled=true;
+  try{
+    stream=await navigator.mediaDevices.getDisplayMedia({
+      video:true,
+      audio:{suppressLocalAudioPlayback:false}
+    });
+    if(!stream.getAudioTracks().length){
+      throw new Error("No audio shared. Choose Chrome Tab and enable Share tab audio.");
+    }
+    context=new AudioContext();
+    await context.resume();
+    source=context.createMediaStreamSource(
+      new MediaStream(stream.getAudioTracks())
+    );
+    analyser=context.createAnalyser();
+    analyser.fftSize=4096;
+    analyser.smoothingTimeConstant=0.7;
+    source.connect(analyser);
+    // No speaker connection: YouTube already plays the sound.
+    stream.getVideoTracks()[0].onended=cleanup;
+    beginAnalysis("Listening to shared tab. Play the song on YouTube.");
+  }catch(error){
+    cleanup();
+    status.textContent=error.message;
+  }
+};
+stop.onclick=()=>cleanup();
+function beginAnalysis(message){
+    stop.disabled=false;
+    status.textContent=message;
+    w.clearRect(0,0,1000,250);
+    const time=new Float32Array(analyser.fftSize);
+    const bins=new Uint8Array(analyser.frequencyBinCount);
+    previous=0;
+
+    function draw(now){
+      frame=requestAnimationFrame(draw);
+      if(now-previous<33 || frozen) return;
+      previous=now;
+      analyser.getFloatTimeDomainData(time);
+      showAnalysis(time, context);
+      window.updateFpgaInput(time, context.sampleRate);
+      samplingLab(time, context, source);
+      showQuantization(time, context);
+      extraAnalysis(time, context, source, analyser);
+      analyser.getByteFrequencyData(bins);
+
+      // Scroll an amplitude envelope left.
+      let energy=0;
+      for(const sample of time) energy+=sample*sample;
+      const peak=Math.sqrt(energy/time.length)
+        * Number(sensitivity.value);
+      w.drawImage(wave,4,0,996,250,0,0,996,250);
+      w.clearRect(996,0,4,250);
+      w.fillStyle="#40d9b5";
+      const height=Math.min(peak,1)*115;
+      w.fillRect(996,125-height,4,Math.max(1,2*height));
+
+      s.clearRect(0,0,1000,230);
+      const maximum=context.sampleRate/2;
+      for(let bar=0;bar<64;bar++){
+        const low=20*Math.pow(maximum/20,bar/64);
+        const high=20*Math.pow(maximum/20,(bar+1)/64);
+        const first=Math.floor(low/context.sampleRate*analyser.fftSize);
+        const last=Math.max(first+1,
+          Math.ceil(high/context.sampleRate*analyser.fftSize));
+        let level=0;
+        for(let i=first;i<Math.min(last,bins.length);i++){
+          level=Math.max(level,bins[i]);
+        }
+        const height=level/255*205;
+        s.fillStyle=`hsl(${165+bar},80%,60%)`;
+        s.fillRect(bar*1000/64,210-height,12,height);
+      }
+      s.font="12px system-ui";
+      s.fillStyle="#dceaff";
+      for(const frequency of [20,100,1000,10000,20000]){
+        if(frequency>=maximum) continue;
+        const x=Math.log(frequency/20)/Math.log(maximum/20)*1000;
+        const label=frequency>=1000
+          ? (frequency/1000)+" kHz" : frequency+" Hz";
+        s.fillText(label,Math.max(0,Math.min(x,940)),226);
+
+      }
+    }
+    frame=requestAnimationFrame(draw);
+}
+const dj={ctx:null,raw:null,url:null,active:false,nodes:null};
+const djMedia=document.getElementById("djMedia");
+const djMessage=document.getElementById("djMessage");
+const djDefinitions=[
+ ["bass","Bass",-12,12,0,1,"dB"],
+ ["mid","Mid",-12,12,0,1,"dB"],
+ ["treble","Treble",-12,12,0,1,"dB"],
+ ["cutoff","Filter frequency",30,18000,1000,10,"Hz"],
+ ["volume","Output gain",0,100,65,1,"%"],
+ ["speed","Playback speed",0.5,1.5,1,0.05,"x"]
+];
+for(const [id,label,min,max,value,step,unit] of djDefinitions){
+ const box=document.createElement("label");
+ box.innerHTML=`${label}: <output id="djValue_${id}"></output><br><input style="width:95%" id="dj_${id}" type="range" min="${min}" max="${max}" value="${value}" step="${step}">`;
+ document.getElementById("djSliders").appendChild(box);
+ document.getElementById("dj_"+id).oninput=updateDj;
+}
+function updateDj(){
+ const values={};
+ for(const [id,label,min,max,defaultValue,step,unit] of djDefinitions){
+  values[id]=Number(document.getElementById("dj_"+id).value);
+  document.getElementById("djValue_"+id).textContent=values[id]+" "+unit;
+ }
+ djMedia.playbackRate=values.speed;
+ djMedia.loop=document.getElementById("djLoop").checked;
+ if(!dj.nodes)return;
+ const t=dj.ctx.currentTime, n=dj.nodes;
+ for(const id of ["bass","mid","treble"])n[id].gain.setTargetAtTime(values[id],t,0.02);
+ n.gain.gain.setTargetAtTime(values.volume/100,t,0.02);
+ const mode=document.getElementById("djMode").value;
+ n.filter.type=mode==="off"?"allpass":mode;
+ n.filter.frequency.setTargetAtTime(Math.min(values.cutoff,dj.ctx.sampleRate*0.45),t,0.02);
+}
+document.getElementById("djMode").onchange=updateDj;
+document.getElementById("djLoop").onchange=updateDj;
+document.getElementById("djReset").onclick=()=>{
+ for(const [id,label,min,max,value] of djDefinitions)document.getElementById("dj_"+id).value=value;
+ document.getElementById("djMode").value="off";updateDj();
+};
+document.getElementById("djFile").onchange=()=>{
+ const file=document.getElementById("djFile").files[0];if(!file)return;
+ cleanup();djMedia.removeAttribute("src");djMedia.load();
+ if(dj.url)URL.revokeObjectURL(dj.url);
+ dj.url=URL.createObjectURL(file);djMedia.src=dj.url;
+ djMessage.textContent="Loaded: "+file.name+". Press Play to start the lab.";
+};
+djMedia.addEventListener("error",()=>{djMessage.textContent="Cannot decode this file. Try your extracted test_audio.wav.";});
+djMedia.addEventListener("play",async()=>{
+ try{
+  if(context===dj.ctx && source && dj.nodes && source===dj.nodes.gain){await dj.ctx.resume();return;}
+  cleanup(true);
+  if(!dj.ctx){dj.ctx=new AudioContext();dj.raw=dj.ctx.createMediaElementSource(djMedia);}
+  context=dj.ctx;await context.resume();
+  dj.raw.disconnect();
+  if(dj.nodes)for(const node of Object.values(dj.nodes))node.disconnect();
+  const bass=context.createBiquadFilter();bass.type="lowshelf";bass.frequency.value=200;
+  const mid=context.createBiquadFilter();mid.type="peaking";mid.frequency.value=1000;mid.Q.value=0.8;
+  const treble=context.createBiquadFilter();treble.type="highshelf";treble.frequency.value=4000;
+  const filter=context.createBiquadFilter();filter.Q.value=0.707;
+  const gain=context.createGain();dj.nodes={bass,mid,treble,filter,gain};
+  dj.raw.connect(bass);bass.connect(mid);mid.connect(treble);treble.connect(filter);filter.connect(gain);
+  source=gain;analyser=context.createAnalyser();analyser.fftSize=4096;analyser.smoothingTimeConstant=0.7;
+  source.connect(analyser);source.connect(context.destination);updateDj();
+  start.disabled=false;beginAnalysis("Local player active: graphs and FFT use processed audio.");
+  djMessage.textContent="Playing through EQ and filters. Reduce output gain if boosted audio distorts.";
+ }catch(error){cleanup();djMessage.textContent=error.message;}
+});
+updateDj();
+
+</script>
+
+<!-- noise-experiment -->
+<section style="margin-top:35px">
+<h2>🧪 Test Signal → Noise → Filter</h2>
+<p>Independent experiment. These controls do not change YouTube audio.</p>
+
+<label>Tone:
+<select id="testTone">
+<option value="200">200 Hz</option>
+<option value="500" selected>500 Hz</option>
+<option value="1000">1000 Hz</option>
+<option value="2000">2000 Hz</option>
+</select>
+</label>
+
+<label>Noise level:
+<input id="testNoise" type="range"
+ min="0" max="1" step="0.05" value="0.5">
+</label>
+
+<label>Low-pass cutoff:
+<select id="testCutoff">
+<option value="800">800 Hz</option>
+<option value="1500" selected>1500 Hz</option>
+<option value="3000">3000 Hz</option>
+</select>
+</label>
+
+<button id="runTest">Generate experiment</button>
+<p id="testMetrics">Click Generate experiment.</p>
+
+<h3>Waveform: clean / noisy / filtered</h3>
+<canvas id="testWave" width="1000" height="280"></canvas>
+<p>Green: clean · Blue: noisy · Orange: filtered.
+Filter delay is compensated for this comparison.</p>
+
+<h3>Frequency spectrum</h3>
+<canvas id="testSpectrum" width="1000" height="280"></canvas>
+
+<h3>Listen — start at low volume</h3>
+<p>Clean</p><audio id="cleanAudio" controls></audio>
+<p>Noisy</p><audio id="noisyAudio" controls></audio>
+<p>Filtered</p><audio id="filteredAudio" controls></audio>
+
+<p>SNR compares separately known signal and noise powers.
+Output SNR uses filtered signal and filtered noise.
+It does not measure signal distortion.</p>
+</section>
+
+<script>
+(()=>{
+const get=id=>document.getElementById(id);
+const fs=16000, length=fs*2, taps=129, delay=(taps-1)/2;
+let audioUrls=[];
+
+function filter(input,h){
+  const output=new Float64Array(input.length);
+  for(let i=0;i<input.length;i++){
+    for(let j=0;j<h.length && j<=i;j++){
+      output[i]+=h[j]*input[i-j];
+    }
+  }
+  return output;
+}
+
+function power(values){
+  let sum=0,count=0;
+  // Exclude FIR startup transient.
+  for(let i=taps;i<values.length;i++){
+    sum+=values[i]*values[i]; count++;
+  }
+  return sum/count;
+}
+
+function snr(signal,noise){
+  const sp=power(signal),np=power(noise);
+  if(np===0)return "∞";
+  return (10*Math.log10(sp/np)).toFixed(1);
+}
+
+function wav(values){
+  const buffer=new ArrayBuffer(44+values.length*2);
+  const view=new DataView(buffer);
+  const text=(offset,value)=>{
+    for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i));
+  };
+  text(0,"RIFF");view.setUint32(4,36+values.length*2,true);
+  text(8,"WAVE");text(12,"fmt ");
+  view.setUint32(16,16,true);view.setUint16(20,1,true);
+  view.setUint16(22,1,true);view.setUint32(24,fs,true);
+  view.setUint32(28,fs*2,true);view.setUint16(32,2,true);
+  view.setUint16(34,16,true);text(36,"data");
+  view.setUint32(40,values.length*2,true);
+  for(let i=0;i<values.length;i++){
+    const fade=Math.min(1,i/160,(values.length-1-i)/160);
+    const value=Math.max(-1,Math.min(1,values[i]*0.2*fade));
+    view.setInt16(44+i*2,Math.round(value*32767),true);
+  }
+  return URL.createObjectURL(new Blob([buffer],{type:"audio/wav"}));
+}
+
+function plot(canvas,traces,spectrum){
+  const c=canvas.getContext("2d");
+  c.clearRect(0,0,1000,280);
+  c.font="12px system-ui";
+  const left=55,right=980,top=20,bottom=245;
+  const y=value=>spectrum
+    ? top+Math.max(0,Math.min(100,-value))/100*(bottom-top)
+    : (top+bottom)/2-value*(bottom-top)/3;
+
+  const levels=spectrum?[0,-20,-40,-60,-80,-100]:[-1,0,1];
+  for(const level of levels){
+    c.strokeStyle="#294059";c.beginPath();
+    c.moveTo(left,y(level));c.lineTo(right,y(level));c.stroke();
+    c.fillStyle="#afbed1";
+    c.fillText(level+(spectrum?" dB":""),2,y(level)+4);
+  }
+
+  c.save();c.beginPath();c.rect(left,top,right-left,bottom-top);c.clip();
+  for(const trace of traces){
+    c.strokeStyle=trace.colour;c.lineWidth=1.5;c.beginPath();
+    trace.values.forEach((value,i)=>{
+      const x=left+i/(trace.values.length-1)*(right-left);
+      if(i===0)c.moveTo(x,y(value));else c.lineTo(x,y(value));
+    });
+    c.stroke();
+  }
+  c.restore();
+  c.fillStyle="#afbed1";
+  c.fillText("0",left,270);
+  c.fillText(spectrum?"8000 Hz":"20 ms",right-60,270);
+}
+
+function spectrum(values){
+  const N=1024, start=2048, result=[];
+  let windowSum=0;
+  const window=Array.from({length:N},(_,i)=>{
+    const w=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));
+    windowSum+=w;return w;
+  });
+  for(let k=0;k<=N/2;k++){
+    let real=0,imag=0;
+    for(let i=0;i<N;i++){
+      const v=values[start+i]*window[i],angle=2*Math.PI*k*i/N;
+      real+=v*Math.cos(angle);imag-=v*Math.sin(angle);
+    }
+    const factor=(k===0 || k===N/2)?1:2;
+    result.push(20*Math.log10(Math.max(
+      factor*Math.hypot(real,imag)/windowSum,1e-6
+    )));
+  }
+  return result;
+}
+
+get("runTest").onclick=()=>{
+  const frequency=Number(get("testTone").value);
+  const noiseLevel=Number(get("testNoise").value);
+  const cutoff=Number(get("testCutoff").value);
+
+  // Fixed seed keeps comparisons repeatable.
+  let seed=123456789;
+  function random(){
+    seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;
+    return (seed>>>0)/4294967296;
+  }
+
+  const clean=new Float64Array(length);
+  const noise=new Float64Array(length);
+  const noisy=new Float64Array(length);
+  for(let i=0;i<length;i++){
+    clean[i]=0.5*Math.sin(2*Math.PI*frequency*i/fs);
+    noise[i]=noiseLevel*(2*random()-1);
+    noisy[i]=clean[i]+noise[i];
+  }
+
+  // Windowed-sinc FIR low-pass, normalized for unity DC gain.
+  const h=new Float64Array(taps);
+  let sum=0;
+  for(let i=0;i<taps;i++){
+    const n=i-delay;
+    const ideal=n===0?2*cutoff/fs:
+      Math.sin(2*Math.PI*cutoff*n/fs)/(Math.PI*n);
+    h[i]=ideal*(0.54-0.46*Math.cos(2*Math.PI*i/(taps-1)));
+    sum+=h[i];
+  }
+  for(let i=0;i<taps;i++)h[i]/=sum;
+
+  const filteredSignal=filter(clean,h);
+  const filteredNoise=filter(noise,h);
+  const filtered=new Float64Array(length);
+  for(let i=0;i<length;i++){
+    filtered[i]=filteredSignal[i]+filteredNoise[i];
+  }
+
+  const gainDb=10*Math.log10(power(filteredSignal)/power(clean));
+  get("testMetrics").textContent=
+    "Input SNR: "+snr(clean,noise)+" dB"+
+    " | Output SNR: "+snr(filteredSignal,filteredNoise)+" dB"+
+    " | Signal power change: "+gainDb.toFixed(1)+" dB"+
+    (frequency>=cutoff?" | Warning: tone is at/above filter cutoff.":"");
+
+  const colours=["#40d9b5","#579fff","#ffab65"];
+  const signals=[clean,noisy,filtered];
+  const start=2048, count=320;
+
+  plot(get("testWave"),signals.map((values,i)=>({
+    colour:colours[i],
+    values:Array.from(values.slice(
+      start+(i===2?delay:0),start+count+(i===2?delay:0)
+    ))
+  })),false);
+
+  plot(get("testSpectrum"),signals.map((values,i)=>({
+    colour:colours[i],values:spectrum(values)
+  })),true);
+
+  ["cleanAudio","noisyAudio","filteredAudio"].forEach(id=>get(id).pause());
+  audioUrls.forEach(url=>URL.revokeObjectURL(url));
+  audioUrls=signals.map(wav);
+  ["cleanAudio","noisyAudio","filteredAudio"].forEach((id,i)=>{
+    get(id).src=audioUrls[i];
+  });
+};
+
+// Avoid overlapping previews.
+["cleanAudio","noisyAudio","filteredAudio"].forEach(id=>{
+  get(id).onplay=()=>{
+    ["cleanAudio","noisyAudio","filteredAudio"].forEach(other=>{
+      if(other!==id)get(other).pause();
+    });
+  };
+});
+})();
+</script>
+
+
+<!-- fpga-fft-lab -->
+<section>
+<h2>⚙️ FPGA FFT Lab — Input Preparation</h2>
+<p>Live audio → 256 signed Q1.15 samples → floating-point FFT reference.</p>
+<button id="fftCapture">Capture latest block</button>
+<button id="fftHex">Download input HEX</button>
+<button id="fftReference">Download FFT reference CSV</button>
+<p id="fftInfo">Share audio, then capture a block.</p>
+
+<h3>FFT magnitude</h3>
+<canvas id="fpgaMagnitude" width="1000" height="280"></canvas>
+<p>Green: original float input FFT · Orange: Q1.15 input FFT.
+Rectangular window, normalized one-sided amplitude.</p>
+
+<h3>FFT phase</h3>
+<canvas id="fpgaPhase" width="1000" height="240"></canvas>
+<p>Phase of Q1.15 input FFT, in radians.
+Bins below −80 dB amplitude are hidden.</p>
+
+<h3>First 8 hardware input samples</h3>
+<div style="overflow-x:auto">
+<table style="width:100%;text-align:left;border-spacing:12px">
+<thead><tr>
+<th>Index</th><th>Float</th><th>Signed integer</th>
+<th>Q1.15 value</th><th>HEX</th>
+</tr></thead>
+<tbody id="fpgaTable"></tbody>
+</table>
+</div>
+<p>HEX: one 16-bit two’s-complement sample per line.
+Suitable for a Verilog memory loaded using $readmemh.
+FFT output ordering is natural bin order.</p>
+<p>This panel runs in your browser, not on an FPGA.
+FFT arithmetic is floating-point; only input samples are Q1.15.
+An RTL FFT must match its own scaling and rounding rules.</p>
+</section>
+
+<script>
+(()=>{
+const get=id=>document.getElementById(id);
+const N=256;
+let latest=null, captured=null;
+
+// Called by the existing live-analysis loop.
+window.updateFpgaInput=(values,fs)=>{
+  latest={values:Float64Array.from(values.slice(-N)),fs};
+};
+
+// Iterative radix-2 FFT: negative-exponent forward transform.
+function fft(input){
+  const re=Float64Array.from(input);
+  const im=new Float64Array(N);
+  for(let i=1,j=0;i<N;i++){
+    let bit=N>>1;
+    for(;j&bit;bit>>=1)j^=bit;
+    j^=bit;
+    if(i<j){
+      const value=re[i];re[i]=re[j];re[j]=value;
+    }
+  }
+  for(let size=2;size<=N;size*=2){
+    const half=size/2;
+    for(let base=0;base<N;base+=size){
+      for(let j=0;j<half;j++){
+        const angle=-2*Math.PI*j/size;
+        const wr=Math.cos(angle),wi=Math.sin(angle);
+        const a=base+j,b=a+half;
+        const tr=wr*re[b]-wi*im[b];
+        const ti=wr*im[b]+wi*re[b];
+        const ar=re[a],ai=im[a];
+        re[a]=ar+tr;im[a]=ai+ti;
+        re[b]=ar-tr;im[b]=ai-ti;
+      }
+    }
+  }
+  return {re,im};
+}
+
+const hex=value=>(value & 65535).toString(16).toUpperCase().padStart(4,"0");
+
+function amplitude(result,k){
+  const factor=(k===0 || k===N/2)?1:2;
+  return factor*Math.hypot(result.re[k],result.im[k])/N;
+}
+
+function graph(canvas,traces,fs,isPhase){
+  const c=canvas.getContext("2d");
+  const left=65,right=980,top=20,bottom=canvas.height-35;
+  const x=k=>left+k/(N/2)*(right-left);
+  const y=value=>isPhase
+    ? top+(Math.PI-value)/(2*Math.PI)*(bottom-top)
+    : top+Math.max(0,Math.min(120,-value))/120*(bottom-top);
+  c.clearRect(0,0,canvas.width,canvas.height);
+  c.font="12px system-ui";
+  const levels=isPhase?[-Math.PI,0,Math.PI]:[0,-30,-60,-90,-120];
+
+  for(const level of levels){
+    c.strokeStyle="#294059";c.beginPath();
+    c.moveTo(left,y(level));c.lineTo(right,y(level));c.stroke();
+    c.fillStyle="#afbed1";
+    c.fillText(isPhase?level.toFixed(2):level+" dB",2,y(level)+4);
+  }
+  for(let i=0;i<=4;i++){
+    const k=i*N/8;
+    c.fillStyle="#afbed1";
+    c.fillText(
+      Math.round(k*fs/N)+" Hz",
+      Math.min(x(k),920),canvas.height-10
+    );
+  }
+
+  c.save();c.beginPath();c.rect(left,top,right-left,bottom-top);c.clip();
+  for(const trace of traces){
+    c.strokeStyle=trace.colour;c.lineWidth=1.7;c.beginPath();
+    let drawing=false;
+    for(let k=0;k<=N/2;k++){
+      const a=amplitude(trace.result,k);
+      if(isPhase && a<0.0001){drawing=false;continue;}
+      const value=isPhase
+        ? Math.atan2(trace.result.im[k],trace.result.re[k])
+        : 20*Math.log10(Math.max(a,1e-12));
+      if(!drawing){c.moveTo(x(k),y(value));drawing=true;}
+      else c.lineTo(x(k),y(value));
+    }
+    c.stroke();
+  }
+  c.restore();
+}
+
+get("fftCapture").onclick=()=>{
+  if(!latest || latest.values.length!==N){
+    alert("Share song tab audio first.");return;
+  }
+  const original=latest.values;
+  const codes=Int16Array.from(original,value=>
+    Math.max(-32768,Math.min(32767,Math.round(value*32768)))
+  );
+  const fixed=Float64Array.from(codes,value=>value/32768);
+  const floatFFT=fft(original),fixedFFT=fft(fixed);
+  let mse=0,clipped=0;
+  for(let i=0;i<N;i++){
+    mse+=(fixed[i]-original[i])**2;
+    if(original[i]<-1 || original[i]>32767/32768)clipped++;
+  }
+  captured={original,codes,fixed,floatFFT,fixedFFT,fs:latest.fs};
+
+  get("fftInfo").textContent=
+    "N: 256 | FFT stages: 8"+
+    " | Sample rate: "+latest.fs+" Hz"+
+    " | Bin spacing: "+(latest.fs/N).toFixed(2)+" Hz"+
+    " | Block duration: "+(N/latest.fs*1000).toFixed(2)+" ms"+
+    " | Input RMSE: "+Math.sqrt(mse/N).toExponential(3)+
+    " | Input samples outside Q1.15 range: "+clipped;
+
+  graph(get("fpgaMagnitude"),[
+    {result:floatFFT,colour:"#40d9b5"},
+    {result:fixedFFT,colour:"#ffab65"}
+  ],latest.fs,false);
+  graph(get("fpgaPhase"),[
+    {result:fixedFFT,colour:"#ffab65"}
+  ],latest.fs,true);
+
+  get("fpgaTable").innerHTML=Array.from(codes.slice(0,8),(value,i)=>
+    "<tr><td>"+i+"</td><td>"+original[i].toFixed(7)+
+    "</td><td>"+value+"</td><td>"+fixed[i].toFixed(7)+
+    "</td><td>"+hex(value)+"</td></tr>"
+  ).join("");
+};
+
+function download(name,text,type){
+  const url=URL.createObjectURL(new Blob([text],{type}));
+  const a=document.createElement("a");
+  a.href=url;a.download=name;document.body.appendChild(a);
+  a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+get("fftHex").onclick=()=>{
+  if(!captured){alert("Capture a block first.");return;}
+  download(
+    "fft_input_q15.hex",
+    Array.from(captured.codes,hex).join("\n")+"\n",
+    "text/plain"
+  );
+};
+
+get("fftReference").onclick=()=>{
+  if(!captured){alert("Capture a block first.");return;}
+  const q=captured;
+  let csv="bin,frequency_hz,real,imag\n";
+  for(let k=0;k<N;k++){
+    const signedFrequency=(k<=N/2?k:k-N)*q.fs/N;
+    csv+=[k,signedFrequency,q.fixedFFT.re[k],q.fixedFFT.im[k]].join(",")+"\n";
+  }
+  download("fft_reference_unscaled.csv",csv,"text/csv");
+};
+})();
+</script>
+
+</body>
+</html>
